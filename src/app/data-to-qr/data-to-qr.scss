@@ -473,7 +473,13 @@
     }
   }
 
+  &__filename {
+    width: 11rem !important;
+    max-width: 100%;
+  }
+
   &__combined-actions {
+    align-items: center;
     display: flex;
     gap: 0.75rem;
     margin-top: 0.75rem;

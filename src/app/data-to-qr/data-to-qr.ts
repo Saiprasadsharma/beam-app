@@ -30,6 +30,7 @@ type VerifyState = 'idle' | 'ok' | 'bad';
 // flaky to decode, especially off a phone screen).
 const CHUNK_SIZE = 300;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
+const ROTATION_TICK_MS = 100; // rotation clock resolution; fastest per-code time is 0.2s
 
 // Header: magic(4) batchId(6) index(3) total(3) mode(1) crc32-hex(8) = 25 chars,
 // followed by the raw chunk payload. Nothing is persisted anywhere; the whole
@@ -183,7 +184,7 @@ export class DataToQr implements OnDestroy {
   protected readonly displayMode = signal<DisplayMode>('all');
   protected readonly rotationIntervalSeconds = signal(5);
   protected readonly rotationIndex = signal(0);
-  protected readonly rotationSecondsLeft = signal(5);
+  protected readonly rotationMsLeft = signal(5000);
   protected readonly rotationCycle = signal(1);
   protected readonly rotationPaused = signal(false);
   protected readonly partsFilter = signal('');
@@ -318,9 +319,9 @@ export class DataToQr implements OnDestroy {
       this.rotationIndex.set(0);
       this.rotationCycle.set(1);
       this.rotationPaused.set(false);
-      this.rotationSecondsLeft.set(this.rotationIntervalSeconds());
+      this.rotationMsLeft.set(this.rotationIntervalSeconds() * 1000);
       this.clearRotationTimer();
-      this.rotationTimerId = setInterval(() => this.tickRotation(), 1000);
+      this.rotationTimerId = setInterval(() => this.tickRotation(), ROTATION_TICK_MS);
     } else {
       this.clearRotationTimer();
       this.exitFullscreen();
@@ -332,9 +333,9 @@ export class DataToQr implements OnDestroy {
     if (this.rotationPaused()) {
       return;
     }
-    const secondsLeft = this.rotationSecondsLeft() - 1;
-    if (secondsLeft > 0) {
-      this.rotationSecondsLeft.set(secondsLeft);
+    const msLeft = this.rotationMsLeft() - ROTATION_TICK_MS;
+    if (msLeft > 0) {
+      this.rotationMsLeft.set(msLeft);
       return;
     }
     this.stepRotation(1);
@@ -351,7 +352,7 @@ export class DataToQr implements OnDestroy {
       this.rotationCycle.set(this.rotationCycle() + 1);
     }
     this.rotationIndex.set(next);
-    this.rotationSecondsLeft.set(this.rotationIntervalSeconds());
+    this.rotationMsLeft.set(this.rotationIntervalSeconds() * 1000);
   }
 
   protected nextPart(): void {
@@ -364,7 +365,7 @@ export class DataToQr implements OnDestroy {
 
   protected togglePause(): void {
     this.rotationPaused.set(!this.rotationPaused());
-    this.rotationSecondsLeft.set(this.rotationIntervalSeconds());
+    this.rotationMsLeft.set(this.rotationIntervalSeconds() * 1000);
   }
 
   protected onJumpInput(event: Event): void {
@@ -372,14 +373,14 @@ export class DataToQr implements OnDestroy {
     const position = this.rotationChunks().findIndex((c) => c.index === value);
     if (position >= 0) {
       this.rotationIndex.set(position);
-      this.rotationSecondsLeft.set(this.rotationIntervalSeconds());
+      this.rotationMsLeft.set(this.rotationIntervalSeconds() * 1000);
     }
   }
 
   protected onFilterInput(event: Event): void {
     this.partsFilter.set((event.target as HTMLInputElement).value);
     this.rotationIndex.set(0);
-    this.rotationSecondsLeft.set(this.rotationIntervalSeconds());
+    this.rotationMsLeft.set(this.rotationIntervalSeconds() * 1000);
   }
 
   protected clearFilter(): void {
@@ -421,10 +422,10 @@ export class DataToQr implements OnDestroy {
 
   protected onIntervalInput(event: Event): void {
     const target = event.target as HTMLInputElement;
-    const value = Math.min(15, Math.max(2, Number(target.value) || 5));
+    const value = Math.min(15, Math.max(0.2, Math.round((Number(target.value) || 5) * 10) / 10));
     this.rotationIntervalSeconds.set(value);
     if (this.displayMode() === 'loop') {
-      this.rotationSecondsLeft.set(value);
+      this.rotationMsLeft.set(value * 1000);
     }
   }
 
@@ -535,7 +536,7 @@ export class DataToQr implements OnDestroy {
       await this.html5QrCode.start(
         { facingMode: 'environment' },
         {
-          fps: 10,
+          fps: 20,
           // A larger box gives the decoder more pixels per module, which matters
           // for dense QR codes — a small box crops away detail.
           qrbox: { width: 320, height: 320 },
@@ -835,6 +836,12 @@ export class DataToQr implements OnDestroy {
     }
   }
 
+  protected readonly downloadName = signal('combined-text');
+
+  protected onDownloadNameInput(event: Event): void {
+    this.downloadName.set((event.target as HTMLInputElement).value);
+  }
+
   protected downloadText(): void {
     if (!this.isBrowser || !this.combinedText()) {
       return;
@@ -843,7 +850,9 @@ export class DataToQr implements OnDestroy {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'combined-text.txt';
+    // Strip characters that are invalid in file names and any ".txt" the user typed themselves.
+    const cleaned = this.downloadName().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\.txt$/i, '').trim();
+    anchor.download = `${cleaned || 'combined-text'}.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
   }

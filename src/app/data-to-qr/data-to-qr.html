@@ -69,7 +69,7 @@
             @if (displayMode() === 'loop') {
               <label class="qr__interval">
                 Seconds per code:
-                <input type="number" min="2" max="15" [value]="rotationIntervalSeconds()" (input)="onIntervalInput($event)" />
+                <input type="number" min="0.2" max="15" step="0.1" [value]="rotationIntervalSeconds()" (change)="onIntervalInput($event)" />
               </label>
             }
           </div>
@@ -103,7 +103,7 @@
               @if (rotationPaused()) {
                 paused
               } @else {
-                next in {{ rotationSecondsLeft() }}s
+                next in {{ (rotationMsLeft() / 1000).toFixed(1) }}s
               }
             </p>
             <figure class="qr__rotate-figure">
@@ -256,6 +256,19 @@
             <textarea rows="6" readonly [value]="combinedText()"></textarea>
             <div class="scanner__combined-actions">
               <button type="button" (click)="copyText()">Copy Text</button>
+              <label class="qr__interval">
+                File name:
+                <input
+                  class="scanner__filename"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="combined-text"
+                  [value]="downloadName()"
+                  (input)="onDownloadNameInput($event)"
+                />
+                .txt
+              </label>
               <button type="button" (click)="downloadText()">Download Text</button>
             </div>
             <p class="qr__meta">Copy auto-clears the clipboard after 30s. Download saves a file to this device.</p>
