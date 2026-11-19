@@ -29,6 +29,10 @@
       <textarea
         rows="4"
         placeholder="Enter or paste text here..."
+        autocomplete="off"
+        autocorrect="off"
+        autocapitalize="off"
+        spellcheck="false"
         [value]="inputText()"
         (input)="onInput($event)"
       ></textarea>
@@ -36,7 +40,7 @@
       <p class="qr__meta">
         {{ charCount() }} characters
         @if (chunkCount() > 0) {
-          &middot; {{ chunkCount() }} QR code{{ chunkCount() === 1 ? '' : 's' }} needed
+          &middot; up to {{ chunkCount() }} QR code{{ chunkCount() === 1 ? '' : 's' }} (fewer if it compresses)
         }
       </p>
 
@@ -50,6 +54,10 @@
       <button type="button" (click)="reset()">Reset</button>
 
       @if (qrChunks().length > 0) {
+        @if (generatedInfo()) {
+          <p class="qr__meta">{{ qrChunks().length }} QR code{{ qrChunks().length === 1 ? '' : 's' }} &middot; {{ generatedInfo() }}</p>
+        }
+
         @if (qrChunks().length > 1) {
           <div class="qr__mode-toggle">
             <button type="button" class="qr__mode-btn" [class.qr__mode-btn--active]="displayMode() === 'all'" (click)="setDisplayMode('all')">
@@ -65,24 +73,59 @@
               </label>
             }
           </div>
+
+          @if (displayMode() === 'loop') {
+            <div class="qr__filter">
+              <label class="qr__interval">
+                Only show parts:
+                <input
+                  class="qr__filter-input"
+                  type="text"
+                  placeholder="e.g. 12-15, 40, 77 (blank = all)"
+                  autocomplete="off"
+                  [value]="partsFilter()"
+                  (input)="onFilterInput($event)"
+                />
+              </label>
+              @if (partsFilter()) {
+                <button type="button" class="qr__ctl" (click)="clearFilter()">Show all</button>
+              }
+            </div>
+          }
         }
 
         @if (displayMode() === 'loop' && activeRotationChunk()) {
-          <div class="qr__rotate-view">
+          <div class="qr__rotate-view" [class.qr__rotate-view--full]="isFullscreen()">
             <p class="qr__meta">
               Cycle {{ rotationCycle() }} &middot; Part {{ activeRotationChunk()!.index }} of {{ qrChunks().length }}
-              &middot; next in {{ rotationSecondsLeft() }}s
+              ({{ rotationIndex() + 1 }}/{{ rotationChunks().length }} in loop)
+              &middot;
+              @if (rotationPaused()) {
+                paused
+              } @else {
+                next in {{ rotationSecondsLeft() }}s
+              }
             </p>
             <figure class="qr__rotate-figure">
               <img [src]="activeRotationChunk()!.dataUrl" [alt]="'QR code part ' + activeRotationChunk()!.index" />
               <figcaption>{{ activeRotationChunk()!.text.length }} chars</figcaption>
             </figure>
+            <div class="qr__rotate-controls">
+              <button type="button" class="qr__ctl" (click)="prevPart()">&laquo; Prev</button>
+              <button type="button" class="qr__ctl" (click)="togglePause()">{{ rotationPaused() ? 'Resume' : 'Pause' }}</button>
+              <button type="button" class="qr__ctl" (click)="nextPart()">Next &raquo;</button>
+              <label class="qr__interval">
+                Jump to
+                <input type="number" min="1" [max]="qrChunks().length" placeholder="#" (input)="onJumpInput($event)" />
+              </label>
+              <button type="button" class="qr__ctl" (click)="toggleFullscreen()">{{ isFullscreen() ? 'Exit fullscreen' : 'Fullscreen' }}</button>
+            </div>
           </div>
         } @else {
           <div class="qr__grid">
             @for (chunk of qrChunks(); track chunk.index) {
               <figure>
-                <img [src]="chunk.dataUrl" [alt]="'QR code part ' + chunk.index" />
+                <img [src]="chunk.dataUrl" [alt]="'QR code part ' + chunk.index" loading="lazy" />
                 <figcaption>Part {{ chunk.index }} &middot; {{ chunk.text.length }} chars</figcaption>
               </figure>
             }
@@ -102,11 +145,30 @@
             </button>
           } @else {
             <button type="button" class="scanner__stop" (click)="stopScan()">Stop Scan</button>
+            @if (torchSupported()) {
+              <button type="button" class="qr__ctl" (click)="toggleTorch()">{{ torchOn() ? 'Flashlight off' : 'Flashlight on' }}</button>
+            }
           }
-          <button type="button" (click)="clearAll()" [disabled]="scannedCodes().length === 0">
+          <button type="button" class="qr__ctl" (click)="clearAll()" [disabled]="scannedCodes().length === 0">
             Clear All
           </button>
+          <button type="button" class="qr__ctl" (click)="wipeEverything()" title="Clears scans, combined text, typed text, generated QRs and clipboard">
+            Wipe everything
+          </button>
         </div>
+
+        @if (scannedCodes().length > 0) {
+          <div class="scanner__sticky" [class.scanner__sticky--done]="scanProgress().complete">
+            <div class="scanner__sticky-top">
+              <strong>{{ scanProgress().scannedCount }} / {{ scanProgress().total }}</strong>
+              <span>{{ progressPercent() }}%</span>
+            </div>
+            <div class="scanner__bar"><div class="scanner__bar-fill" [style.width.%]="progressPercent()"></div></div>
+            @if (!scanProgress().complete) {
+              <p class="scanner__missing">Missing: {{ missingRanges() }}</p>
+            }
+          </div>
+        }
 
         @if (scanError()) {
           <p class="qr__error">{{ scanError() }}</p>
@@ -124,23 +186,44 @@
           <p class="scanner__flash scanner__flash--duplicate">Duplicate QR code &mdash; already scanned</p>
         }
 
-        @if (newBatchFlash()) {
-          <p class="scanner__flash scanner__flash--newbatch">New batch detected &mdash; previous scan cleared</p>
+        @if (gapWarning()) {
+          <p class="scanner__flash scanner__flash--duplicate">{{ gapWarning() }}</p>
+        }
+
+        @if (pendingBatch()) {
+          <div class="scanner__flash scanner__flash--newbatch">
+            <p>A QR from a <strong>different batch</strong> was seen. Switch to it? This discards the {{ scanProgress().scannedCount }} part(s) scanned so far.</p>
+            <div class="scanner__controls">
+              <button type="button" class="qr__ctl" (click)="acceptNewBatch()">Switch to new batch</button>
+              <button type="button" class="qr__ctl" (click)="keepCurrentBatch()">Keep current</button>
+            </div>
+          </div>
         }
 
         @if (scanProgress().complete) {
-          <p class="scanner__flash scanner__flash--complete">
-            &#10003; All {{ scanProgress().total }} parts captured &mdash; camera stopped.
-          </p>
+          @if (verifyState() === 'ok') {
+            <p class="scanner__flash scanner__flash--complete">
+              &#10003; All {{ scanProgress().total }} parts captured and checksum verified &mdash; camera stopped.
+            </p>
+          } @else if (verifyState() === 'bad') {
+            <p class="scanner__flash scanner__flash--bad">
+              &#9888; All parts captured but the checksum does not match &mdash; a code was misread. Clear all and rescan.
+            </p>
+          }
         }
 
-        <div class="scanner__results">
-          <div class="scanner__results-header">
-            <h2>Scanned Parts ({{ scannedCodes().length }})</h2>
-            @if (combinedText()) {
-              <span class="qr__meta">{{ combinedCharCount() }} total characters</span>
+        @if (partMap().length > 0) {
+          <div class="scanner__map" aria-label="Part map">
+            @for (part of partMap(); track part.index) {
+              <span class="scanner__tile" [class.scanner__tile--ok]="part.scanned" [class.scanner__tile--missing]="!part.scanned">{{ part.index }}</span>
             }
           </div>
+        }
+
+        <details class="scanner__results">
+          <summary class="scanner__results-header">
+            <h2>Scanned Parts ({{ scannedCodes().length }})</h2>
+          </summary>
 
           @if (scannedCodes().length === 0) {
             <p class="scanner__empty">No QR codes scanned yet. Start the camera and scan the parts in any order.</p>
@@ -158,16 +241,11 @@
               }
             </ol>
           }
+        </details>
 
-          @if (scannedCodes().length > 0 && !scanProgress().complete) {
-            <p class="scanner__progress">
-              Scanned {{ scanProgress().scannedCount }} of {{ scanProgress().total }}
-              @if (scanProgress().missingIndices.length > 0) {
-                &mdash; missing part{{ scanProgress().missingIndices.length === 1 ? '' : 's' }}: {{ scanProgress().missingIndices.join(', ') }}
-              }
-            </p>
-          }
-        </div>
+        @if (scannedCodes().length === 0) {
+          <p class="scanner__empty">No QR codes scanned yet. Start the camera and scan the parts in any order.</p>
+        }
 
         @if (combinedText()) {
           <div class="scanner__combined">
@@ -180,6 +258,7 @@
               <button type="button" (click)="copyText()">Copy Text</button>
               <button type="button" (click)="downloadText()">Download Text</button>
             </div>
+            <p class="qr__meta">Copy auto-clears the clipboard after 30s. Download saves a file to this device.</p>
           </div>
         }
       </div>
