@@ -31,8 +31,8 @@ type VerifyState = 'idle' | 'ok' | 'bad';
 const CHUNK_SIZE = 300;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-// Marks an optional "file name" prefix inside the payload: MARK + 3-digit length + name + content.
-const FILE_MARK = '\u0001QRF';
+// Marks a file entry inside the payload (see packFiles).
+const FILE_MARK = '\u0001QRM';
 const DEFAULT_DOWNLOAD_NAME = 'combined-text';
 const ROTATION_TICK_MS = 100; // rotation clock resolution; fastest per-code time is 0.2s
 
@@ -85,6 +85,10 @@ function parseChunkHeader(decodedText: string): ParsedChunk | null {
 // ---- CRC32 (integrity check on the reassembled payload) ----
 let crcTable: Uint32Array | null = null;
 function crc32Hex(text: string): string {
+  return crc32(new TextEncoder().encode(text)).toString(16).padStart(8, '0');
+}
+
+function crc32(bytes: Uint8Array): number {
   if (!crcTable) {
     crcTable = new Uint32Array(256);
     for (let n = 0; n < 256; n++) {
@@ -95,12 +99,77 @@ function crc32Hex(text: string): string {
       crcTable[n] = c >>> 0;
     }
   }
-  const bytes = new TextEncoder().encode(text);
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.length; i++) {
     crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
   }
-  return ((crc ^ 0xffffffff) >>> 0).toString(16).padStart(8, '0');
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+// ---- Minimal ZIP writer (store only, UTF-8 names) so several files download as one ----
+function buildZip(files: { name: string; data: Uint8Array }[]): Blob {
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | Math.floor(now.getSeconds() / 2);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const body: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const name = enc.encode(file.name);
+    const size = file.data.length;
+    const crc = crc32(file.data);
+
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true); // UTF-8 file names
+    lv.setUint16(10, dosTime, true);
+    lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, name.length, true);
+    local.set(name, 30);
+
+    const entry = new Uint8Array(46 + name.length);
+    const cv = new DataView(entry.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 20, true);
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true);
+    cv.setUint16(12, dosTime, true);
+    cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true);
+    entry.set(name, 46);
+
+    body.push(local, file.data);
+    central.push(entry);
+    offset += local.length + size;
+  }
+
+  const centralSize = central.reduce((sum, e) => sum + e.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true);
+  ev.setUint32(12, centralSize, true);
+  ev.setUint32(16, offset, true);
+
+  return new Blob([...body, ...central, end] as BlobPart[], { type: 'application/zip' });
+}
+
+/** Strips path/invalid characters so a name received over QR can't escape the download folder. */
+function safeFileName(name: string): string {
+  const cleaned = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim();
+  return cleaned || 'file';
 }
 
 // ---- Compression (deflate-raw + base64) ----
@@ -160,6 +229,44 @@ function parsePartFilter(text: string): Set<number> {
   return result;
 }
 
+interface TransferFile {
+  name: string;
+  text: string;
+}
+
+/** Packs files as repeated: MARK + 3-digit name length + name + 8-digit content length + content. */
+function packFiles(files: TransferFile[]): string {
+  return files
+    .map((f) => {
+      const name = f.name.slice(0, 200);
+      return `${FILE_MARK}${String(name.length).padStart(3, '0')}${name}${String(f.text.length).padStart(8, '0')}${f.text}`;
+    })
+    .join('');
+}
+
+function unpackFiles(text: string): TransferFile[] | null {
+  const files: TransferFile[] = [];
+  let pos = 0;
+  while (pos < text.length) {
+    if (!text.startsWith(FILE_MARK, pos)) {
+      return null;
+    }
+    pos += FILE_MARK.length;
+    const nameLength = Number(text.slice(pos, pos + 3));
+    pos += 3;
+    const name = text.slice(pos, pos + nameLength);
+    pos += nameLength;
+    const contentLength = Number(text.slice(pos, pos + 8));
+    pos += 8;
+    if (!Number.isInteger(nameLength) || !Number.isInteger(contentLength) || pos + contentLength > text.length) {
+      return null;
+    }
+    files.push({ name, text: text.slice(pos, pos + contentLength) });
+    pos += contentLength;
+  }
+  return files.length > 0 ? files : null;
+}
+
 interface WakeLockSentinelLike {
   release(): Promise<void>;
 }
@@ -181,7 +288,11 @@ export class DataToQr implements OnDestroy {
   protected readonly errorMessage = signal('');
   protected readonly generatedInfo = signal('');
 
-  protected readonly charCount = computed(() => this.inputText().length);
+  protected readonly files = signal<TransferFile[]>([]);
+
+  protected readonly charCount = computed(() =>
+    this.files().length > 0 ? this.files().reduce((sum, f) => sum + f.text.length, 0) : this.inputText().length,
+  );
   protected readonly chunkCount = computed(() => Math.ceil(this.charCount() / CHUNK_SIZE));
 
   // ---- Auto-rotate display state ----
@@ -227,6 +338,7 @@ export class DataToQr implements OnDestroy {
   protected readonly torchOn = signal(false);
 
   protected readonly combinedText = signal('');
+  protected readonly receivedFiles = signal<TransferFile[]>([]);
   protected readonly verifyState = signal<VerifyState>('idle');
 
   protected readonly scanProgress = computed(() => {
@@ -284,6 +396,7 @@ export class DataToQr implements OnDestroy {
     this.clearRotationTimer();
     this.scannedCodes.set([]);
     this.combinedText.set('');
+    this.receivedFiles.set([]);
   }
 
   // Warn before a refresh/close throws away a half-finished scan (nothing is saved to disk).
@@ -439,15 +552,11 @@ export class DataToQr implements OnDestroy {
     this.inputText.set(target.value);
   }
 
-  protected readonly sourceFileName = signal('');
-
   protected async onFileSelected(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
-    const file = input.files?.[0];
+    const picked = Array.from(input.files ?? []);
     input.value = '';
-    if (file) {
-      await this.loadFile(file);
-    }
+    await this.loadFiles(picked);
   }
 
   protected onDragOver(event: DragEvent): void {
@@ -456,35 +565,58 @@ export class DataToQr implements OnDestroy {
 
   protected onDrop(event: DragEvent): void {
     event.preventDefault();
-    const file = event.dataTransfer?.files?.[0];
-    if (file) {
-      void this.loadFile(file);
-    }
+    void this.loadFiles(Array.from(event.dataTransfer?.files ?? []));
   }
 
-  private async loadFile(file: File): Promise<void> {
-    this.errorMessage.set('');
-    if (file.size > MAX_FILE_BYTES) {
-      this.errorMessage.set(`File is too large (${Math.round(file.size / 1024)} KB). Limit is ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
+  protected removeFile(name: string): void {
+    this.files.set(this.files().filter((f) => f.name !== name));
+    this.qrChunks.set([]);
+    this.generatedInfo.set('');
+  }
+
+  protected clearFiles(): void {
+    this.files.set([]);
+    this.qrChunks.set([]);
+    this.generatedInfo.set('');
+  }
+
+  private async loadFiles(picked: File[]): Promise<void> {
+    if (picked.length === 0) {
       return;
     }
-    try {
-      const text = await file.text();
-      if (text.includes('\u0000')) {
-        this.errorMessage.set('That looks like a binary file, not text. Only text-based files are supported.');
-        return;
+    this.errorMessage.set('');
+    const problems: string[] = [];
+    let list = this.files();
+
+    for (const file of picked) {
+      if (file.size > MAX_FILE_BYTES) {
+        problems.push(`${file.name}: too large (${Math.round(file.size / 1024)} KB, limit ${MAX_FILE_BYTES / 1024 / 1024} MB)`);
+        continue;
       }
-      this.inputText.set(text);
-      this.sourceFileName.set(file.name);
-      this.qrChunks.set([]);
-      this.generatedInfo.set('');
-    } catch {
-      this.errorMessage.set('Could not read that file.');
+      try {
+        const text = await file.text();
+        if (text.includes('\u0000')) {
+          problems.push(`${file.name}: looks like a binary file`);
+          continue;
+        }
+        // Same name replaces the earlier copy.
+        list = [...list.filter((f) => f.name !== file.name), { name: file.name, text }];
+      } catch {
+        problems.push(`${file.name}: could not be read`);
+      }
+    }
+
+    this.files.set(list);
+    this.qrChunks.set([]);
+    this.generatedInfo.set('');
+    if (problems.length > 0) {
+      this.errorMessage.set(`Skipped — ${problems.join('; ')}.`);
     }
   }
 
   protected async generate(): Promise<void> {
-    const text = this.inputText();
+    const fileList = this.files();
+    const text = fileList.length > 0 ? packFiles(fileList) : this.inputText();
     this.errorMessage.set('');
     this.generatedInfo.set('');
     this.clearRotationTimer();
@@ -492,7 +624,7 @@ export class DataToQr implements OnDestroy {
     this.partsFilter.set('');
 
     if (!text.trim()) {
-      this.errorMessage.set('Please enter some text to generate QR codes.');
+      this.errorMessage.set('Please enter some text or upload a file to generate QR codes.');
       this.qrChunks.set([]);
       return;
     }
@@ -501,12 +633,9 @@ export class DataToQr implements OnDestroy {
 
     try {
       // Compress when it actually helps; fall back to raw text otherwise.
-      // When the text came from a file, its name rides inside the (compressed) payload.
-      const fileName = this.sourceFileName().slice(0, 200);
-      const envelope = fileName ? `${FILE_MARK}${String(fileName.length).padStart(3, '0')}${fileName}${text}` : text;
-      const deflated = await deflateToBase64(envelope);
-      const compressed = deflated !== null && deflated.length < envelope.length;
-      const body = compressed ? deflated : envelope;
+      const deflated = await deflateToBase64(text);
+      const compressed = deflated !== null && deflated.length < text.length;
+      const body = compressed ? deflated : text;
       const mode: PayloadMode = compressed ? 'z' : 'r';
       const crc = crc32Hex(body);
 
@@ -547,7 +676,7 @@ export class DataToQr implements OnDestroy {
 
   protected reset(): void {
     this.inputText.set('');
-    this.sourceFileName.set('');
+    this.files.set([]);
     this.qrChunks.set([]);
     this.errorMessage.set('');
     this.generatedInfo.set('');
@@ -762,27 +891,33 @@ export class DataToQr implements OnDestroy {
     const token = ++this.decodeToken;
     if (!assembled) {
       this.combinedText.set('');
+      this.receivedFiles.set([]);
       this.verifyState.set('idle');
       return;
     }
     if (crc32Hex(assembled.payload) !== assembled.crc) {
       this.combinedText.set('');
+      this.receivedFiles.set([]);
       this.verifyState.set('bad');
       return;
     }
     try {
       const text = assembled.mode === 'z' ? await inflateFromBase64(assembled.payload) : assembled.payload;
       if (token === this.decodeToken) {
-        let content = text;
         if (text.startsWith(FILE_MARK)) {
-          const nameLength = Number(text.slice(FILE_MARK.length, FILE_MARK.length + 3));
-          const nameStart = FILE_MARK.length + 3;
-          if (Number.isInteger(nameLength)) {
-            this.downloadName.set(text.slice(nameStart, nameStart + nameLength));
-            content = text.slice(nameStart + nameLength);
+          const unpacked = unpackFiles(text);
+          if (!unpacked) {
+            this.combinedText.set('');
+            this.receivedFiles.set([]);
+            this.verifyState.set('bad');
+            return;
           }
+          this.combinedText.set('');
+          this.receivedFiles.set(unpacked);
+        } else {
+          this.combinedText.set(text);
+          this.receivedFiles.set([]);
         }
-        this.combinedText.set(content);
         this.verifyState.set('ok');
       }
     } catch {
@@ -856,6 +991,7 @@ export class DataToQr implements OnDestroy {
   protected clearAll(): void {
     this.scannedCodes.set([]);
     this.downloadName.set(DEFAULT_DOWNLOAD_NAME);
+    this.receivedFiles.set([]);
     this.scanError.set('');
     this.gapWarning.set('');
     this.pendingBatch.set(null);
@@ -880,11 +1016,19 @@ export class DataToQr implements OnDestroy {
   }
 
   protected async copyText(): Promise<void> {
-    if (!this.isBrowser || !this.combinedText()) {
+    await this.copyToClipboard(this.combinedText());
+  }
+
+  protected async copyFile(file: TransferFile): Promise<void> {
+    await this.copyToClipboard(file.text);
+  }
+
+  private async copyToClipboard(text: string): Promise<void> {
+    if (!this.isBrowser || !text) {
       return;
     }
     try {
-      await navigator.clipboard.writeText(this.combinedText());
+      await navigator.clipboard.writeText(text);
       this.copiedToClipboard = true;
       // Best-effort: don't leave the data sitting on the clipboard.
       setTimeout(() => {
@@ -908,17 +1052,45 @@ export class DataToQr implements OnDestroy {
     if (!this.isBrowser || !this.combinedText()) {
       return;
     }
-    const blob = new Blob([this.combinedText()], { type: 'text/plain;charset=utf-8' });
+    // Default to .txt unless the user typed an extension.
+    let name = safeFileName(this.downloadName() || DEFAULT_DOWNLOAD_NAME);
+    if (!/\.[A-Za-z0-9]+$/.test(name)) {
+      name += '.txt';
+    }
+    this.saveBlob(new Blob([this.combinedText()], { type: 'text/plain;charset=utf-8' }), name);
+  }
+
+  protected downloadFile(file: TransferFile): void {
+    if (!this.isBrowser) {
+      return;
+    }
+    this.saveBlob(new Blob([file.text], { type: 'text/plain;charset=utf-8' }), safeFileName(file.name));
+  }
+
+  protected downloadAllAsZip(): void {
+    if (!this.isBrowser || this.receivedFiles().length === 0) {
+      return;
+    }
+    const used = new Set<string>();
+    const entries = this.receivedFiles().map((f) => {
+      // Keep names unique inside the zip: "a.ts", "a (2).ts", ...
+      const base = safeFileName(f.name);
+      let name = base;
+      for (let n = 2; used.has(name); n++) {
+        const dot = base.lastIndexOf('.');
+        name = dot > 0 ? `${base.slice(0, dot)} (${n})${base.slice(dot)}` : `${base} (${n})`;
+      }
+      used.add(name);
+      return { name, data: new TextEncoder().encode(f.text) };
+    });
+    this.saveBlob(buildZip(entries), 'files.zip');
+  }
+
+  private saveBlob(blob: Blob, filename: string): void {
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    // Strip characters that are invalid in file names and any ".txt" the user typed themselves.
-    // Keep any extension the sender's file had (e.g. .ts, .html); default to .txt otherwise.
-    let cleaned = this.downloadName().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim();
-    if (!cleaned) {
-      cleaned = DEFAULT_DOWNLOAD_NAME;
-    }
-    anchor.download = /\.[A-Za-z0-9]+$/.test(cleaned) ? cleaned : `${cleaned}.txt`;
+    anchor.download = filename;
     anchor.click();
     URL.revokeObjectURL(url);
   }

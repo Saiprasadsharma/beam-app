@@ -155,6 +155,39 @@
     flex-wrap: wrap;
   }
 
+  &__files {
+    list-style: none;
+    margin: 0 0 0.75rem;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+
+  &__file {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #e4e7ec;
+    border-radius: 8px;
+
+    .qr__meta {
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    button {
+      padding: 0.3rem 0.7rem;
+    }
+  }
+
+  &__file-name {
+    flex: 1 1 auto;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
   &__upload {
     display: flex;
     align-items: center;

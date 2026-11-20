@@ -28,35 +28,49 @@
     <section class="qr__panel">
       <div class="qr__upload">
         <label class="qr__upload-btn">
-          Upload a text file
+          Upload text files
           <input
             type="file"
+            multiple
             hidden
             accept="text/*,.txt,.html,.htm,.css,.scss,.ts,.tsx,.js,.jsx,.json,.md,.xml,.csv,.yml,.yaml,.log,.sql,.sh,.py,.java,.cs,.go,.rs"
             (change)="onFileSelected($event)"
           />
         </label>
         <span class="qr__meta">
-          @if (sourceFileName()) {
-            Loaded <strong>{{ sourceFileName() }}</strong> &mdash; its name is sent along so the receiver can save it under the same name.
+          @if (files().length > 0) {
+            File names are sent along so the receiver can save them under the same names.
           } @else {
-            or drag a file onto the box below. Files stay in your browser; nothing is uploaded.
+            or drag files onto the box below. Files stay in your browser; nothing is uploaded.
           }
         </span>
       </div>
 
-      <textarea
-        rows="4"
-        (dragover)="onDragOver($event)"
-        (drop)="onDrop($event)"
-        placeholder="Enter or paste text here, or upload a file..."
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
-        spellcheck="false"
-        [value]="inputText()"
-        (input)="onInput($event)"
-      ></textarea>
+      @if (files().length > 0) {
+        <ul class="qr__files" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+          @for (file of files(); track file.name) {
+            <li class="qr__file">
+              <span class="qr__file-name">{{ file.name }}</span>
+              <span class="qr__meta">{{ file.text.length }} chars</span>
+              <button type="button" class="qr__ctl" title="Remove" (click)="removeFile(file.name)">&times;</button>
+            </li>
+          }
+        </ul>
+        <button type="button" class="qr__ctl" (click)="clearFiles()">Remove all files</button>
+      } @else {
+        <textarea
+          rows="4"
+          (dragover)="onDragOver($event)"
+          (drop)="onDrop($event)"
+          placeholder="Enter or paste text here, or upload a file..."
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          [value]="inputText()"
+          (input)="onInput($event)"
+        ></textarea>
+      }
 
       <p class="qr__meta">
         {{ charCount() }} characters
@@ -266,6 +280,28 @@
 
         @if (scannedCodes().length === 0) {
           <p class="scanner__empty">No QR codes scanned yet. Start the camera and scan the parts in any order.</p>
+        }
+
+        @if (receivedFiles().length > 0) {
+          <div class="scanner__combined">
+            <div class="scanner__results-header">
+              <h2>Received files ({{ receivedFiles().length }})</h2>
+              @if (receivedFiles().length > 1) {
+                <button type="button" (click)="downloadAllAsZip()">Download all (.zip)</button>
+              }
+            </div>
+            <ul class="qr__files">
+              @for (file of receivedFiles(); track file.name) {
+                <li class="qr__file">
+                  <span class="qr__file-name">{{ file.name }}</span>
+                  <span class="qr__meta">{{ file.text.length }} chars</span>
+                  <button type="button" class="qr__ctl" (click)="copyFile(file)">Copy</button>
+                  <button type="button" (click)="downloadFile(file)">Download</button>
+                </li>
+              }
+            </ul>
+            <p class="qr__meta">Copy auto-clears the clipboard after 30s. Downloads save files to this device.</p>
+          </div>
         }
 
         @if (combinedText()) {
