@@ -26,9 +26,30 @@
 
   @if (activeTab() === 'generate') {
     <section class="qr__panel">
+      <div class="qr__upload">
+        <label class="qr__upload-btn">
+          Upload a text file
+          <input
+            type="file"
+            hidden
+            accept="text/*,.txt,.html,.htm,.css,.scss,.ts,.tsx,.js,.jsx,.json,.md,.xml,.csv,.yml,.yaml,.log,.sql,.sh,.py,.java,.cs,.go,.rs"
+            (change)="onFileSelected($event)"
+          />
+        </label>
+        <span class="qr__meta">
+          @if (sourceFileName()) {
+            Loaded <strong>{{ sourceFileName() }}</strong> &mdash; its name is sent along so the receiver can save it under the same name.
+          } @else {
+            or drag a file onto the box below. Files stay in your browser; nothing is uploaded.
+          }
+        </span>
+      </div>
+
       <textarea
         rows="4"
-        placeholder="Enter or paste text here..."
+        (dragover)="onDragOver($event)"
+        (drop)="onDrop($event)"
+        placeholder="Enter or paste text here, or upload a file..."
         autocomplete="off"
         autocorrect="off"
         autocapitalize="off"
@@ -257,17 +278,16 @@
             <div class="scanner__combined-actions">
               <button type="button" (click)="copyText()">Copy Text</button>
               <label class="qr__interval">
-                File name:
+                Save as:
                 <input
                   class="scanner__filename"
                   type="text"
                   autocomplete="off"
                   spellcheck="false"
-                  placeholder="combined-text"
+                  placeholder="combined-text.txt"
                   [value]="downloadName()"
                   (input)="onDownloadNameInput($event)"
                 />
-                .txt
               </label>
               <button type="button" (click)="downloadText()">Download Text</button>
             </div>

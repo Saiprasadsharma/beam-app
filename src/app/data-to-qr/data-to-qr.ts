@@ -30,6 +30,10 @@ type VerifyState = 'idle' | 'ok' | 'bad';
 // flaky to decode, especially off a phone screen).
 const CHUNK_SIZE = 300;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
+const MAX_FILE_BYTES = 2 * 1024 * 1024;
+// Marks an optional "file name" prefix inside the payload: MARK + 3-digit length + name + content.
+const FILE_MARK = '\u0001QRF';
+const DEFAULT_DOWNLOAD_NAME = 'combined-text';
 const ROTATION_TICK_MS = 100; // rotation clock resolution; fastest per-code time is 0.2s
 
 // Header: magic(4) batchId(6) index(3) total(3) mode(1) crc32-hex(8) = 25 chars,
@@ -435,6 +439,50 @@ export class DataToQr implements OnDestroy {
     this.inputText.set(target.value);
   }
 
+  protected readonly sourceFileName = signal('');
+
+  protected async onFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) {
+      await this.loadFile(file);
+    }
+  }
+
+  protected onDragOver(event: DragEvent): void {
+    event.preventDefault();
+  }
+
+  protected onDrop(event: DragEvent): void {
+    event.preventDefault();
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      void this.loadFile(file);
+    }
+  }
+
+  private async loadFile(file: File): Promise<void> {
+    this.errorMessage.set('');
+    if (file.size > MAX_FILE_BYTES) {
+      this.errorMessage.set(`File is too large (${Math.round(file.size / 1024)} KB). Limit is ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (text.includes('\u0000')) {
+        this.errorMessage.set('That looks like a binary file, not text. Only text-based files are supported.');
+        return;
+      }
+      this.inputText.set(text);
+      this.sourceFileName.set(file.name);
+      this.qrChunks.set([]);
+      this.generatedInfo.set('');
+    } catch {
+      this.errorMessage.set('Could not read that file.');
+    }
+  }
+
   protected async generate(): Promise<void> {
     const text = this.inputText();
     this.errorMessage.set('');
@@ -453,9 +501,12 @@ export class DataToQr implements OnDestroy {
 
     try {
       // Compress when it actually helps; fall back to raw text otherwise.
-      const deflated = await deflateToBase64(text);
-      const compressed = deflated !== null && deflated.length < text.length;
-      const body = compressed ? deflated : text;
+      // When the text came from a file, its name rides inside the (compressed) payload.
+      const fileName = this.sourceFileName().slice(0, 200);
+      const envelope = fileName ? `${FILE_MARK}${String(fileName.length).padStart(3, '0')}${fileName}${text}` : text;
+      const deflated = await deflateToBase64(envelope);
+      const compressed = deflated !== null && deflated.length < envelope.length;
+      const body = compressed ? deflated : envelope;
       const mode: PayloadMode = compressed ? 'z' : 'r';
       const crc = crc32Hex(body);
 
@@ -496,6 +547,7 @@ export class DataToQr implements OnDestroy {
 
   protected reset(): void {
     this.inputText.set('');
+    this.sourceFileName.set('');
     this.qrChunks.set([]);
     this.errorMessage.set('');
     this.generatedInfo.set('');
@@ -721,7 +773,16 @@ export class DataToQr implements OnDestroy {
     try {
       const text = assembled.mode === 'z' ? await inflateFromBase64(assembled.payload) : assembled.payload;
       if (token === this.decodeToken) {
-        this.combinedText.set(text);
+        let content = text;
+        if (text.startsWith(FILE_MARK)) {
+          const nameLength = Number(text.slice(FILE_MARK.length, FILE_MARK.length + 3));
+          const nameStart = FILE_MARK.length + 3;
+          if (Number.isInteger(nameLength)) {
+            this.downloadName.set(text.slice(nameStart, nameStart + nameLength));
+            content = text.slice(nameStart + nameLength);
+          }
+        }
+        this.combinedText.set(content);
         this.verifyState.set('ok');
       }
     } catch {
@@ -794,6 +855,7 @@ export class DataToQr implements OnDestroy {
 
   protected clearAll(): void {
     this.scannedCodes.set([]);
+    this.downloadName.set(DEFAULT_DOWNLOAD_NAME);
     this.scanError.set('');
     this.gapWarning.set('');
     this.pendingBatch.set(null);
@@ -836,7 +898,7 @@ export class DataToQr implements OnDestroy {
     }
   }
 
-  protected readonly downloadName = signal('combined-text');
+  protected readonly downloadName = signal(DEFAULT_DOWNLOAD_NAME);
 
   protected onDownloadNameInput(event: Event): void {
     this.downloadName.set((event.target as HTMLInputElement).value);
@@ -851,8 +913,12 @@ export class DataToQr implements OnDestroy {
     const anchor = document.createElement('a');
     anchor.href = url;
     // Strip characters that are invalid in file names and any ".txt" the user typed themselves.
-    const cleaned = this.downloadName().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\.txt$/i, '').trim();
-    anchor.download = `${cleaned || 'combined-text'}.txt`;
+    // Keep any extension the sender's file had (e.g. .ts, .html); default to .txt otherwise.
+    let cleaned = this.downloadName().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim();
+    if (!cleaned) {
+      cleaned = DEFAULT_DOWNLOAD_NAME;
+    }
+    anchor.download = /\.[A-Za-z0-9]+$/.test(cleaned) ? cleaned : `${cleaned}.txt`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
