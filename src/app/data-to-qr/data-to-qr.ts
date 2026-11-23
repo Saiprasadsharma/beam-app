@@ -28,7 +28,7 @@ type VerifyState = 'idle' | 'ok' | 'bad';
 // Kept small enough that each QR code's modules stay large enough to scan
 // reliably with a webcam (dense high-version codes from larger chunks were
 // flaky to decode, especially off a phone screen).
-const CHUNK_SIZE = 300;
+const CHUNK_SIZE = 250;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 // Marks a file entry inside the payload (see packFiles).
