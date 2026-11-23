@@ -28,7 +28,15 @@ type VerifyState = 'idle' | 'ok' | 'bad';
 // Kept small enough that each QR code's modules stay large enough to scan
 // reliably with a webcam (dense high-version codes from larger chunks were
 // flaky to decode, especially off a phone screen).
-const CHUNK_SIZE = 250;
+// Characters of data per QR code. Fewer characters = a simpler, bigger-module code that
+// low-quality webcams can read more easily, at the cost of more codes.
+const DENSITY_OPTIONS = [
+  { size: 150, label: 'Easiest to scan (150 chars)' },
+  { size: 200, label: 'Easy (200 chars)' },
+  { size: 250, label: 'Balanced (250 chars)' },
+  { size: 300, label: 'Dense (300 chars)' },
+];
+const DEFAULT_CHUNK_SIZE = 250;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 // Marks a file entry inside the payload (see packFiles).
@@ -293,7 +301,13 @@ export class DataToQr implements OnDestroy {
   protected readonly charCount = computed(() =>
     this.files().length > 0 ? this.files().reduce((sum, f) => sum + f.text.length, 0) : this.inputText().length,
   );
-  protected readonly chunkCount = computed(() => Math.ceil(this.charCount() / CHUNK_SIZE));
+  protected readonly densityOptions = DENSITY_OPTIONS;
+  protected readonly chunkSize = signal(DEFAULT_CHUNK_SIZE);
+  protected readonly chunkCount = computed(() => Math.ceil(this.charCount() / this.chunkSize()));
+
+  protected onDensityChange(event: Event): void {
+    this.chunkSize.set(Number((event.target as HTMLSelectElement).value) || DEFAULT_CHUNK_SIZE);
+  }
 
   // ---- Auto-rotate display state ----
   protected readonly displayMode = signal<DisplayMode>('all');
@@ -639,7 +653,7 @@ export class DataToQr implements OnDestroy {
       const mode: PayloadMode = compressed ? 'z' : 'r';
       const crc = crc32Hex(body);
 
-      const chunks = body.match(new RegExp(`.{1,${CHUNK_SIZE}}`, 'gsu')) ?? [];
+      const chunks = body.match(new RegExp(`.{1,${this.chunkSize()}}`, 'gsu')) ?? [];
       if (chunks.length > MAX_PARTS) {
         this.errorMessage.set(`Text is too large: needs ${chunks.length} QR codes (max ${MAX_PARTS}).`);
         this.qrChunks.set([]);
@@ -656,7 +670,7 @@ export class DataToQr implements OnDestroy {
             return {
               index,
               text: chunk,
-              dataUrl: await QRCode.toDataURL(encoded, { errorCorrectionLevel: 'M', margin: 1, width: 256 }),
+              dataUrl: await QRCode.toDataURL(encoded, { errorCorrectionLevel: 'M', margin: 4, scale: 6 }),
             };
           }),
         ),
@@ -709,20 +723,25 @@ export class DataToQr implements OnDestroy {
         return;
       }
 
+      const cameraId = this.selectedCameraId();
       this.html5QrCode = new Html5Qrcode('qr-scanner-viewport', {
         verbose: false,
         useBarCodeDetectorIfSupported: true,
       });
 
       await this.html5QrCode.start(
-        { facingMode: 'environment' },
+        cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
         {
           fps: 20,
           // A larger box gives the decoder more pixels per module, which matters
           // for dense QR codes — a small box crops away detail.
-          qrbox: { width: 320, height: 320 },
+          // Use ~90% of the frame so a low-res webcam keeps every pixel it can.
+          qrbox: (width: number, height: number) => {
+            const side = Math.floor(Math.min(width, height) * 0.9);
+            return { width: side, height: side };
+          },
           videoConstraints: {
-            facingMode: 'environment',
+            ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' }),
             // Request the highest resolution the camera offers; low-res streams
             // don't have enough detail to resolve the small modules in a dense QR code.
             width: { ideal: 1920 },
@@ -737,6 +756,7 @@ export class DataToQr implements OnDestroy {
 
       this.isScanning.set(true);
       this.detectTorch();
+      void this.loadCameras(Html5Qrcode);
       void this.acquireWakeLock();
     } catch (err) {
       this.scanError.set(this.describeCameraError(err));
@@ -763,6 +783,27 @@ export class DataToQr implements OnDestroy {
     this.torchSupported.set(false);
     this.torchOn.set(false);
     void this.releaseWakeLock();
+  }
+
+  // ---- Camera selection (laptops often expose several cameras, e.g. an IR one) ----
+  protected readonly cameras = signal<{ id: string; label: string }[]>([]);
+  protected readonly selectedCameraId = signal('');
+
+  private async loadCameras(ctor: typeof import('html5-qrcode').Html5Qrcode): Promise<void> {
+    try {
+      const list = await ctor.getCameras();
+      this.cameras.set(list.map((c, i) => ({ id: c.id, label: c.label || `Camera ${i + 1}` })));
+    } catch {
+      // Picker is optional.
+    }
+  }
+
+  protected async onCameraChange(event: Event): Promise<void> {
+    this.selectedCameraId.set((event.target as HTMLSelectElement).value);
+    if (this.isScanning()) {
+      await this.stopScan();
+      await this.startScan();
+    }
   }
 
   // ---- Torch / wake lock ----

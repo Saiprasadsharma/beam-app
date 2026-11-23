@@ -140,7 +140,8 @@
       margin-top: 0;
 
       .qr__rotate-figure {
-        max-width: min(80vh, 90vw);
+        width: min(92vh, 92vw);
+        max-width: none;
         border: none;
       }
     }
@@ -188,6 +189,18 @@
     overflow-wrap: anywhere;
   }
 
+  &__density {
+    margin: 0.5rem 0;
+
+    select {
+      padding: 0.4rem 0.5rem;
+      font: inherit;
+      border: 1px solid #d3d8e0;
+      border-radius: 8px;
+      background: #fff;
+    }
+  }
+
   &__upload {
     display: flex;
     align-items: center;
@@ -227,11 +240,13 @@
 
   &__rotate-figure {
     margin: 0.75rem 0 0;
-    padding: 1.5rem;
+    padding: 0.5rem;
     text-align: center;
     border: 1px solid #e4e7ec;
     border-radius: 10px;
-    max-width: 320px;
+    background: #fff;
+    // Big on screen = more camera pixels per QR module.
+    width: min(92vw, 75vh, 560px);
 
     img {
       width: 100%;

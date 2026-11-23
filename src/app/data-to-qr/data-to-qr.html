@@ -83,6 +83,15 @@
         <p class="qr__error">{{ errorMessage() }}</p>
       }
 
+      <label class="qr__interval qr__density">
+        Code size:
+        <select [value]="chunkSize()" (change)="onDensityChange($event)">
+          @for (opt of densityOptions; track opt.size) {
+            <option [value]="opt.size" [selected]="opt.size === chunkSize()">{{ opt.label }}</option>
+          }
+        </select>
+      </label>
+
       <button type="button" (click)="generate()" [disabled]="isGenerating()">
         {{ isGenerating() ? 'Generating...' : 'Generate QR Codes' }}
       </button>
@@ -141,6 +150,7 @@
                 next in {{ (rotationMsLeft() / 1000).toFixed(1) }}s
               }
             </p>
+            <p class="qr__meta">Scanning with a webcam? Max out this screen's brightness and hold it about 25&ndash;40&nbsp;cm from the camera.</p>
             <figure class="qr__rotate-figure">
               <img [src]="activeRotationChunk()!.dataUrl" [alt]="'QR code part ' + activeRotationChunk()!.index" />
               <figcaption>{{ activeRotationChunk()!.text.length }} chars</figcaption>
@@ -191,6 +201,18 @@
             Wipe everything
           </button>
         </div>
+
+        @if (cameras().length > 1) {
+          <label class="qr__interval qr__density">
+            Camera:
+            <select [value]="selectedCameraId()" (change)="onCameraChange($event)">
+              <option value="">Default</option>
+              @for (cam of cameras(); track cam.id) {
+                <option [value]="cam.id" [selected]="cam.id === selectedCameraId()">{{ cam.label }}</option>
+              }
+            </select>
+          </label>
+        }
 
         @if (scannedCodes().length > 0) {
           <div class="scanner__sticky" [class.scanner__sticky--done]="scanProgress().complete">
