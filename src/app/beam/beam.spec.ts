@@ -1,20 +1,20 @@
 import { provideZonelessChangeDetection } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 
-import { DataToQr } from './data-to-qr';
+import { Beam } from './beam';
 
-describe('DataToQr', () => {
-  let component: DataToQr;
-  let fixture: ComponentFixture<DataToQr>;
+describe('Beam', () => {
+  let component: Beam;
+  let fixture: ComponentFixture<Beam>;
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [DataToQr],
+      imports: [Beam],
       providers: [provideZonelessChangeDetection()]
     })
     .compileComponents();
 
-    fixture = TestBed.createComponent(DataToQr);
+    fixture = TestBed.createComponent(Beam);
     component = fixture.componentInstance;
     fixture.detectChanges();
   });

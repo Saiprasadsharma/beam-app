@@ -24,10 +24,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npx ng build --base-href /data-to-qr-app/
+      - run: npx ng build --base-href /beam-app/
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: dist/data-to-qr-app/browser
+          path: dist/beam-app/browser
 
   deploy:
     needs: build

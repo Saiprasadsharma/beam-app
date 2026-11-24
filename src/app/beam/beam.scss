@@ -1,4 +1,4 @@
-.qr {
+.beam {
   padding: 1rem;
   font-family: system-ui, sans-serif;
   color: #1f2430;
@@ -139,7 +139,7 @@
       background: #fff;
       margin-top: 0;
 
-      .qr__rotate-figure {
+      .beam__rotate-figure {
         width: min(92vh, 92vw);
         max-width: none;
         border: none;
@@ -173,7 +173,7 @@
     border: 1px solid #e4e7ec;
     border-radius: 8px;
 
-    .qr__meta {
+    .beam__meta {
       margin: 0;
       white-space: nowrap;
     }
@@ -245,7 +245,7 @@
     border: 1px solid #e4e7ec;
     border-radius: 10px;
     background: #fff;
-    // Big on screen = more camera pixels per QR module.
+    // Big on screen = more camera pixels per code module.
     width: min(92vw, 75vh, 560px);
 
     img {
@@ -307,7 +307,7 @@
       box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
     }
 
-    #qr-scanner-viewport {
+    #beam-viewport {
       width: 100%;
 
       ::ng-deep video,

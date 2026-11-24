@@ -1,9 +1,9 @@
 import { Component, HostListener, OnDestroy, PLATFORM_ID, computed, effect, inject, signal, untracked } from '@angular/core';
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import * as QRCode from 'qrcode';
+import * as Encoder from 'qrcode';
 
-interface QrChunk {
+interface BeamChunk {
   index: number;
   text: string;
   dataUrl: string;
@@ -25,10 +25,10 @@ type Tab = 'generate' | 'scan';
 type DisplayMode = 'all' | 'loop';
 type VerifyState = 'idle' | 'ok' | 'bad';
 
-// Kept small enough that each QR code's modules stay large enough to scan
+// Kept small enough that each code's modules stay large enough to scan
 // reliably with a webcam (dense high-version codes from larger chunks were
 // flaky to decode, especially off a phone screen).
-// Characters of data per QR code. Fewer characters = a simpler, bigger-module code that
+// Characters of data per code. Fewer characters = a simpler, bigger-module code that
 // low-quality webcams can read more easily, at the cost of more codes.
 const DENSITY_OPTIONS = [
   { size: 150, label: 'Easiest to scan (150 chars)' },
@@ -40,22 +40,22 @@ const DEFAULT_CHUNK_SIZE = 250;
 const MAX_PARTS = 999; // header stores index/total in 3 digits
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 // Marks a file entry inside the payload (see packFiles).
-const FILE_MARK = '\u0001QRM';
+const FILE_MARK = '\u0001BMF';
 const DEFAULT_DOWNLOAD_NAME = 'combined-text';
 const ROTATION_TICK_MS = 100; // rotation clock resolution; fastest per-code time is 0.2s
 
 // Header: magic(4) batchId(6) index(3) total(3) mode(1) crc32-hex(8) = 25 chars,
 // followed by the raw chunk payload. Nothing is persisted anywhere; the whole
 // transfer lives in memory only.
-const QR_MAGIC = 'QRB2';
-const QR_HEADER_LENGTH = 25;
+const BEAM_MAGIC = 'BEAM';
+const BEAM_HEADER_LENGTH = 25;
 
 function makeBatchId(): string {
   return Math.random().toString(36).slice(2, 8).padEnd(6, '0');
 }
 
 function encodeChunkHeader(batchId: string, index: number, total: number, mode: PayloadMode, crc: string): string {
-  return `${QR_MAGIC}${batchId}${String(index).padStart(3, '0')}${String(total).padStart(3, '0')}${mode}${crc}`;
+  return `${BEAM_MAGIC}${batchId}${String(index).padStart(3, '0')}${String(total).padStart(3, '0')}${mode}${crc}`;
 }
 
 interface ParsedChunk {
@@ -68,7 +68,7 @@ interface ParsedChunk {
 }
 
 function parseChunkHeader(decodedText: string): ParsedChunk | null {
-  if (decodedText.length < QR_HEADER_LENGTH || decodedText.slice(0, 4) !== QR_MAGIC) {
+  if (decodedText.length < BEAM_HEADER_LENGTH || decodedText.slice(0, 4) !== BEAM_MAGIC) {
     return null;
   }
   const batchId = decodedText.slice(4, 10);
@@ -87,7 +87,7 @@ function parseChunkHeader(decodedText: string): ParsedChunk | null {
   ) {
     return null;
   }
-  return { batchId, index, total, mode, crc, payload: decodedText.slice(QR_HEADER_LENGTH) };
+  return { batchId, index, total, mode, crc, payload: decodedText.slice(BEAM_HEADER_LENGTH) };
 }
 
 // ---- CRC32 (integrity check on the reassembled payload) ----
@@ -174,7 +174,7 @@ function buildZip(files: { name: string; data: Uint8Array }[]): Blob {
   return new Blob([...body, ...central, end] as BlobPart[], { type: 'application/zip' });
 }
 
-/** Strips path/invalid characters so a name received over QR can't escape the download folder. */
+/** Strips path/invalid characters so a name received over a code can't escape the download folder. */
 function safeFileName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim();
   return cleaned || 'file';
@@ -280,18 +280,18 @@ interface WakeLockSentinelLike {
 }
 
 @Component({
-  selector: 'app-data-to-qr',
+  selector: 'app-beam',
   imports: [CommonModule, FormsModule],
-  templateUrl: './data-to-qr.html',
-  styleUrl: './data-to-qr.scss',
+  templateUrl: './beam.html',
+  styleUrl: './beam.scss',
 })
-export class DataToQr implements OnDestroy {
+export class Beam implements OnDestroy {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
 
   // ---- Generator state ----
   protected readonly inputText = signal('');
-  protected readonly qrChunks = signal<QrChunk[]>([]);
+  protected readonly codeChunks = signal<BeamChunk[]>([]);
   protected readonly isGenerating = signal(false);
   protected readonly errorMessage = signal('');
   protected readonly generatedInfo = signal('');
@@ -322,7 +322,7 @@ export class DataToQr implements OnDestroy {
 
   /** Chunks included in the rotation: all of them, or only those listed in the filter. */
   protected readonly rotationChunks = computed(() => {
-    const chunks = this.qrChunks();
+    const chunks = this.codeChunks();
     const wanted = parsePartFilter(this.partsFilter());
     return wanted.size === 0 ? chunks : chunks.filter((c) => wanted.has(c.index));
   });
@@ -332,7 +332,7 @@ export class DataToQr implements OnDestroy {
   protected readonly activeTab = signal<Tab>('generate');
 
   // ---- Scanner state ----
-  private html5QrCode: import('html5-qrcode').Html5Qrcode | null = null;
+  private reader: import('html5-qrcode').Html5Qrcode | null = null;
   private nextScanId = 1;
   private lastScannedIndex: number | null = null;
   private ignoredBatchId: string | null = null;
@@ -528,7 +528,7 @@ export class DataToQr implements OnDestroy {
       return;
     }
     try {
-      await document.querySelector('.qr__rotate-view')?.requestFullscreen();
+      await document.querySelector('.beam__rotate-view')?.requestFullscreen();
     } catch {
       // Fullscreen is optional; ignore if the browser refuses.
     }
@@ -584,13 +584,13 @@ export class DataToQr implements OnDestroy {
 
   protected removeFile(name: string): void {
     this.files.set(this.files().filter((f) => f.name !== name));
-    this.qrChunks.set([]);
+    this.codeChunks.set([]);
     this.generatedInfo.set('');
   }
 
   protected clearFiles(): void {
     this.files.set([]);
-    this.qrChunks.set([]);
+    this.codeChunks.set([]);
     this.generatedInfo.set('');
   }
 
@@ -621,7 +621,7 @@ export class DataToQr implements OnDestroy {
     }
 
     this.files.set(list);
-    this.qrChunks.set([]);
+    this.codeChunks.set([]);
     this.generatedInfo.set('');
     if (problems.length > 0) {
       this.errorMessage.set(`Skipped — ${problems.join('; ')}.`);
@@ -638,8 +638,8 @@ export class DataToQr implements OnDestroy {
     this.partsFilter.set('');
 
     if (!text.trim()) {
-      this.errorMessage.set('Please enter some text or upload a file to generate QR codes.');
-      this.qrChunks.set([]);
+      this.errorMessage.set('Please enter some text or upload a file to generate codes.');
+      this.codeChunks.set([]);
       return;
     }
 
@@ -655,22 +655,22 @@ export class DataToQr implements OnDestroy {
 
       const chunks = body.match(new RegExp(`.{1,${this.chunkSize()}}`, 'gsu')) ?? [];
       if (chunks.length > MAX_PARTS) {
-        this.errorMessage.set(`Text is too large: needs ${chunks.length} QR codes (max ${MAX_PARTS}).`);
-        this.qrChunks.set([]);
+        this.errorMessage.set(`Text is too large: needs ${chunks.length} codes (max ${MAX_PARTS}).`);
+        this.codeChunks.set([]);
         return;
       }
 
       const batchId = makeBatchId();
       const total = chunks.length;
-      this.qrChunks.set(
+      this.codeChunks.set(
         await Promise.all(
-          chunks.map(async (chunk, i): Promise<QrChunk> => {
+          chunks.map(async (chunk, i): Promise<BeamChunk> => {
             const index = i + 1;
             const encoded = encodeChunkHeader(batchId, index, total, mode, crc) + chunk;
             return {
               index,
               text: chunk,
-              dataUrl: await QRCode.toDataURL(encoded, { errorCorrectionLevel: 'M', margin: 4, scale: 6 }),
+              dataUrl: await Encoder.toDataURL(encoded, { errorCorrectionLevel: 'M', margin: 4, scale: 6 }),
             };
           }),
         ),
@@ -681,8 +681,8 @@ export class DataToQr implements OnDestroy {
           : 'Sent uncompressed (compression would not make it smaller)',
       );
     } catch {
-      this.errorMessage.set('Failed to generate QR codes. Please try again.');
-      this.qrChunks.set([]);
+      this.errorMessage.set('Failed to generate codes. Please try again.');
+      this.codeChunks.set([]);
     } finally {
       this.isGenerating.set(false);
     }
@@ -691,7 +691,7 @@ export class DataToQr implements OnDestroy {
   protected reset(): void {
     this.inputText.set('');
     this.files.set([]);
-    this.qrChunks.set([]);
+    this.codeChunks.set([]);
     this.errorMessage.set('');
     this.generatedInfo.set('');
     this.partsFilter.set('');
@@ -709,13 +709,13 @@ export class DataToQr implements OnDestroy {
     this.scanError.set('');
     this.isStartingScan.set(true);
 
-    if (!document.getElementById('qr-scanner-viewport')) {
+    if (!document.getElementById('beam-viewport')) {
       // Wait a tick for the container to render after a tab switch.
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
     try {
-      const { Html5Qrcode } = await import('html5-qrcode');
+      const { Html5Qrcode: CodeReader } = await import('html5-qrcode');
 
       if (!navigator.mediaDevices?.getUserMedia) {
         this.scanError.set('Camera access is not supported in this browser.');
@@ -724,17 +724,17 @@ export class DataToQr implements OnDestroy {
       }
 
       const cameraId = this.selectedCameraId();
-      this.html5QrCode = new Html5Qrcode('qr-scanner-viewport', {
+      this.reader = new CodeReader('beam-viewport', {
         verbose: false,
         useBarCodeDetectorIfSupported: true,
       });
 
-      await this.html5QrCode.start(
+      await this.reader.start(
         cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' },
         {
           fps: 20,
           // A larger box gives the decoder more pixels per module, which matters
-          // for dense QR codes — a small box crops away detail.
+          // for dense codes — a small box crops away detail.
           // Use ~90% of the frame so a low-res webcam keeps every pixel it can.
           qrbox: (width: number, height: number) => {
             const side = Math.floor(Math.min(width, height) * 0.9);
@@ -743,32 +743,32 @@ export class DataToQr implements OnDestroy {
           videoConstraints: {
             ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: 'environment' }),
             // Request the highest resolution the camera offers; low-res streams
-            // don't have enough detail to resolve the small modules in a dense QR code.
+            // don't have enough detail to resolve the small modules in a dense code.
             width: { ideal: 1920 },
             height: { ideal: 1080 },
           },
         },
         (decodedText) => this.onScanSuccess(decodedText),
         () => {
-          // Ignore per-frame "no QR found" callbacks; this fires continuously while scanning.
+          // Ignore per-frame "no code found" callbacks; this fires continuously while scanning.
         },
       );
 
       this.isScanning.set(true);
       this.detectTorch();
-      void this.loadCameras(Html5Qrcode);
+      void this.loadCameras(CodeReader);
       void this.acquireWakeLock();
     } catch (err) {
       this.scanError.set(this.describeCameraError(err));
-      this.html5QrCode = null;
+      this.reader = null;
     } finally {
       this.isStartingScan.set(false);
     }
   }
 
   protected async stopScan(): Promise<void> {
-    const scanner = this.html5QrCode;
-    this.html5QrCode = null;
+    const scanner = this.reader;
+    this.reader = null;
 
     if (scanner) {
       try {
@@ -809,7 +809,7 @@ export class DataToQr implements OnDestroy {
   // ---- Torch / wake lock ----
   private detectTorch(): void {
     try {
-      const caps = this.html5QrCode?.getRunningTrackCapabilities() as unknown as { torch?: boolean } | undefined;
+      const caps = this.reader?.getRunningTrackCapabilities() as unknown as { torch?: boolean } | undefined;
       this.torchSupported.set(!!caps?.torch);
     } catch {
       this.torchSupported.set(false);
@@ -819,7 +819,7 @@ export class DataToQr implements OnDestroy {
   protected async toggleTorch(): Promise<void> {
     const next = !this.torchOn();
     try {
-      await this.html5QrCode?.applyVideoConstraints({
+      await this.reader?.applyVideoConstraints({
         advanced: [{ torch: next } as unknown as MediaTrackConstraintSet],
       });
       this.torchOn.set(next);
@@ -853,7 +853,7 @@ export class DataToQr implements OnDestroy {
     const parsed = parseChunkHeader(decodedText);
 
     if (!parsed) {
-      this.scanError.set('Scanned code is not a recognized QR-batch part. Ignored.');
+      this.scanError.set('Scanned code is not a recognized batch part. Ignored.');
       return;
     }
 
@@ -1040,7 +1040,7 @@ export class DataToQr implements OnDestroy {
     this.ignoredBatchId = null;
   }
 
-  /** Clears every piece of data this page holds (input, QR codes, scans, combined text, clipboard). */
+  /** Clears every piece of data this page holds (input, codes, scans, combined text, clipboard). */
   protected async wipeEverything(): Promise<void> {
     await this.stopScan();
     this.clearAll();

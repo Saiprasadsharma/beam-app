@@ -3,7 +3,7 @@
   "version": 1,
   "newProjectRoot": "projects",
   "projects": {
-    "data-to-qr-app": {
+    "beam-app": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:component": {
@@ -63,10 +63,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "data-to-qr-app:build:production"
+              "buildTarget": "beam-app:build:production"
             },
             "development": {
-              "buildTarget": "data-to-qr-app:build:development"
+              "buildTarget": "beam-app:build:development"
             }
           },
           "defaultConfiguration": "development"

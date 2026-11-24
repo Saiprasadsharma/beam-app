@@ -1,22 +1,22 @@
-<div class="qr">
-  <h1>QR Code Tools</h1>
+<div class="beam">
+  <h1>Beam</h1>
 
-  <div class="qr__tabs" role="tablist">
+  <div class="beam__tabs" role="tablist">
     <button
       type="button"
       role="tab"
-      class="qr__tab"
-      [class.qr__tab--active]="activeTab() === 'generate'"
+      class="beam__tab"
+      [class.beam__tab--active]="activeTab() === 'generate'"
       [attr.aria-selected]="activeTab() === 'generate'"
       (click)="setTab('generate')"
     >
-      Generate QRs
+      Generate Codes
     </button>
     <button
       type="button"
       role="tab"
-      class="qr__tab"
-      [class.qr__tab--active]="activeTab() === 'scan'"
+      class="beam__tab"
+      [class.beam__tab--active]="activeTab() === 'scan'"
       [attr.aria-selected]="activeTab() === 'scan'"
       (click)="setTab('scan')"
     >
@@ -25,9 +25,9 @@
   </div>
 
   @if (activeTab() === 'generate') {
-    <section class="qr__panel">
-      <div class="qr__upload">
-        <label class="qr__upload-btn">
+    <section class="beam__panel">
+      <div class="beam__upload">
+        <label class="beam__upload-btn">
           Upload text files
           <input
             type="file"
@@ -37,7 +37,7 @@
             (change)="onFileSelected($event)"
           />
         </label>
-        <span class="qr__meta">
+        <span class="beam__meta">
           @if (files().length > 0) {
             File names are sent along so the receiver can save them under the same names.
           } @else {
@@ -47,16 +47,16 @@
       </div>
 
       @if (files().length > 0) {
-        <ul class="qr__files" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
+        <ul class="beam__files" (dragover)="onDragOver($event)" (drop)="onDrop($event)">
           @for (file of files(); track file.name) {
-            <li class="qr__file">
-              <span class="qr__file-name">{{ file.name }}</span>
-              <span class="qr__meta">{{ file.text.length }} chars</span>
-              <button type="button" class="qr__ctl" title="Remove" (click)="removeFile(file.name)">&times;</button>
+            <li class="beam__file">
+              <span class="beam__file-name">{{ file.name }}</span>
+              <span class="beam__meta">{{ file.text.length }} chars</span>
+              <button type="button" class="beam__ctl" title="Remove" (click)="removeFile(file.name)">&times;</button>
             </li>
           }
         </ul>
-        <button type="button" class="qr__ctl" (click)="clearFiles()">Remove all files</button>
+        <button type="button" class="beam__ctl" (click)="clearFiles()">Remove all files</button>
       } @else {
         <textarea
           rows="4"
@@ -72,18 +72,18 @@
         ></textarea>
       }
 
-      <p class="qr__meta">
+      <p class="beam__meta">
         {{ charCount() }} characters
         @if (chunkCount() > 0) {
-          &middot; up to {{ chunkCount() }} QR code{{ chunkCount() === 1 ? '' : 's' }} (fewer if it compresses)
+          &middot; up to {{ chunkCount() }} code{{ chunkCount() === 1 ? '' : 's' }} (fewer if it compresses)
         }
       </p>
 
       @if (errorMessage()) {
-        <p class="qr__error">{{ errorMessage() }}</p>
+        <p class="beam__error">{{ errorMessage() }}</p>
       }
 
-      <label class="qr__interval qr__density">
+      <label class="beam__interval beam__density">
         Code size:
         <select [value]="chunkSize()" (change)="onDensityChange($event)">
           @for (opt of densityOptions; track opt.size) {
@@ -93,25 +93,25 @@
       </label>
 
       <button type="button" (click)="generate()" [disabled]="isGenerating()">
-        {{ isGenerating() ? 'Generating...' : 'Generate QR Codes' }}
+        {{ isGenerating() ? 'Generating...' : 'Generate Codes' }}
       </button>
       <button type="button" (click)="reset()">Reset</button>
 
-      @if (qrChunks().length > 0) {
+      @if (codeChunks().length > 0) {
         @if (generatedInfo()) {
-          <p class="qr__meta">{{ qrChunks().length }} QR code{{ qrChunks().length === 1 ? '' : 's' }} &middot; {{ generatedInfo() }}</p>
+          <p class="beam__meta">{{ codeChunks().length }} code{{ codeChunks().length === 1 ? '' : 's' }} &middot; {{ generatedInfo() }}</p>
         }
 
-        @if (qrChunks().length > 1) {
-          <div class="qr__mode-toggle">
-            <button type="button" class="qr__mode-btn" [class.qr__mode-btn--active]="displayMode() === 'all'" (click)="setDisplayMode('all')">
+        @if (codeChunks().length > 1) {
+          <div class="beam__mode-toggle">
+            <button type="button" class="beam__mode-btn" [class.beam__mode-btn--active]="displayMode() === 'all'" (click)="setDisplayMode('all')">
               Show All
             </button>
-            <button type="button" class="qr__mode-btn" [class.qr__mode-btn--active]="displayMode() === 'loop'" (click)="setDisplayMode('loop')">
+            <button type="button" class="beam__mode-btn" [class.beam__mode-btn--active]="displayMode() === 'loop'" (click)="setDisplayMode('loop')">
               Auto Rotate
             </button>
             @if (displayMode() === 'loop') {
-              <label class="qr__interval">
+              <label class="beam__interval">
                 Seconds per code:
                 <input type="number" min="0.2" max="15" step="0.1" [value]="rotationIntervalSeconds()" (change)="onIntervalInput($event)" />
               </label>
@@ -119,11 +119,11 @@
           </div>
 
           @if (displayMode() === 'loop') {
-            <div class="qr__filter">
-              <label class="qr__interval">
+            <div class="beam__filter">
+              <label class="beam__interval">
                 Only show parts:
                 <input
-                  class="qr__filter-input"
+                  class="beam__filter-input"
                   type="text"
                   placeholder="e.g. 12-15, 40, 77 (blank = all)"
                   autocomplete="off"
@@ -132,16 +132,16 @@
                 />
               </label>
               @if (partsFilter()) {
-                <button type="button" class="qr__ctl" (click)="clearFilter()">Show all</button>
+                <button type="button" class="beam__ctl" (click)="clearFilter()">Show all</button>
               }
             </div>
           }
         }
 
         @if (displayMode() === 'loop' && activeRotationChunk()) {
-          <div class="qr__rotate-view" [class.qr__rotate-view--full]="isFullscreen()">
-            <p class="qr__meta">
-              Cycle {{ rotationCycle() }} &middot; Part {{ activeRotationChunk()!.index }} of {{ qrChunks().length }}
+          <div class="beam__rotate-view" [class.beam__rotate-view--full]="isFullscreen()">
+            <p class="beam__meta">
+              Cycle {{ rotationCycle() }} &middot; Part {{ activeRotationChunk()!.index }} of {{ codeChunks().length }}
               ({{ rotationIndex() + 1 }}/{{ rotationChunks().length }} in loop)
               &middot;
               @if (rotationPaused()) {
@@ -150,27 +150,27 @@
                 next in {{ (rotationMsLeft() / 1000).toFixed(1) }}s
               }
             </p>
-            <p class="qr__meta">Scanning with a webcam? Max out this screen's brightness and hold it about 25&ndash;40&nbsp;cm from the camera.</p>
-            <figure class="qr__rotate-figure">
-              <img [src]="activeRotationChunk()!.dataUrl" [alt]="'QR code part ' + activeRotationChunk()!.index" />
+            <p class="beam__meta">Scanning with a webcam? Max out this screen's brightness and hold it about 25&ndash;40&nbsp;cm from the camera.</p>
+            <figure class="beam__rotate-figure">
+              <img [src]="activeRotationChunk()!.dataUrl" [alt]="'code part ' + activeRotationChunk()!.index" />
               <figcaption>{{ activeRotationChunk()!.text.length }} chars</figcaption>
             </figure>
-            <div class="qr__rotate-controls">
-              <button type="button" class="qr__ctl" (click)="prevPart()">&laquo; Prev</button>
-              <button type="button" class="qr__ctl" (click)="togglePause()">{{ rotationPaused() ? 'Resume' : 'Pause' }}</button>
-              <button type="button" class="qr__ctl" (click)="nextPart()">Next &raquo;</button>
-              <label class="qr__interval">
+            <div class="beam__rotate-controls">
+              <button type="button" class="beam__ctl" (click)="prevPart()">&laquo; Prev</button>
+              <button type="button" class="beam__ctl" (click)="togglePause()">{{ rotationPaused() ? 'Resume' : 'Pause' }}</button>
+              <button type="button" class="beam__ctl" (click)="nextPart()">Next &raquo;</button>
+              <label class="beam__interval">
                 Jump to
-                <input type="number" min="1" [max]="qrChunks().length" placeholder="#" (input)="onJumpInput($event)" />
+                <input type="number" min="1" [max]="codeChunks().length" placeholder="#" (input)="onJumpInput($event)" />
               </label>
-              <button type="button" class="qr__ctl" (click)="toggleFullscreen()">{{ isFullscreen() ? 'Exit fullscreen' : 'Fullscreen' }}</button>
+              <button type="button" class="beam__ctl" (click)="toggleFullscreen()">{{ isFullscreen() ? 'Exit fullscreen' : 'Fullscreen' }}</button>
             </div>
           </div>
         } @else {
-          <div class="qr__grid">
-            @for (chunk of qrChunks(); track chunk.index) {
+          <div class="beam__grid">
+            @for (chunk of codeChunks(); track chunk.index) {
               <figure>
-                <img [src]="chunk.dataUrl" [alt]="'QR code part ' + chunk.index" loading="lazy" />
+                <img [src]="chunk.dataUrl" [alt]="'code part ' + chunk.index" loading="lazy" />
                 <figcaption>Part {{ chunk.index }} &middot; {{ chunk.text.length }} chars</figcaption>
               </figure>
             }
@@ -181,7 +181,7 @@
   }
 
   @if (activeTab() === 'scan') {
-    <section class="qr__panel">
+    <section class="beam__panel">
       <div class="scanner">
         <div class="scanner__controls">
           @if (!isScanning()) {
@@ -191,19 +191,19 @@
           } @else {
             <button type="button" class="scanner__stop" (click)="stopScan()">Stop Scan</button>
             @if (torchSupported()) {
-              <button type="button" class="qr__ctl" (click)="toggleTorch()">{{ torchOn() ? 'Flashlight off' : 'Flashlight on' }}</button>
+              <button type="button" class="beam__ctl" (click)="toggleTorch()">{{ torchOn() ? 'Flashlight off' : 'Flashlight on' }}</button>
             }
           }
-          <button type="button" class="qr__ctl" (click)="clearAll()" [disabled]="scannedCodes().length === 0">
+          <button type="button" class="beam__ctl" (click)="clearAll()" [disabled]="scannedCodes().length === 0">
             Clear All
           </button>
-          <button type="button" class="qr__ctl" (click)="wipeEverything()" title="Clears scans, combined text, typed text, generated QRs and clipboard">
+          <button type="button" class="beam__ctl" (click)="wipeEverything()" title="Clears scans, combined text, typed text, generated codes and clipboard">
             Wipe everything
           </button>
         </div>
 
         @if (cameras().length > 1) {
-          <label class="qr__interval qr__density">
+          <label class="beam__interval beam__density">
             Camera:
             <select [value]="selectedCameraId()" (change)="onCameraChange($event)">
               <option value="">Default</option>
@@ -228,7 +228,7 @@
         }
 
         @if (scanError()) {
-          <p class="qr__error">{{ scanError() }}</p>
+          <p class="beam__error">{{ scanError() }}</p>
         }
 
         <div
@@ -236,11 +236,11 @@
           [class.scanner__viewport--active]="isScanning()"
           [hidden]="!isScanning() && !isStartingScan()"
         >
-          <div id="qr-scanner-viewport"></div>
+          <div id="beam-viewport"></div>
         </div>
 
         @if (duplicateFlash()) {
-          <p class="scanner__flash scanner__flash--duplicate">Duplicate QR code &mdash; already scanned</p>
+          <p class="scanner__flash scanner__flash--duplicate">Duplicate code &mdash; already scanned</p>
         }
 
         @if (gapWarning()) {
@@ -249,10 +249,10 @@
 
         @if (pendingBatch()) {
           <div class="scanner__flash scanner__flash--newbatch">
-            <p>A QR from a <strong>different batch</strong> was seen. Switch to it? This discards the {{ scanProgress().scannedCount }} part(s) scanned so far.</p>
+            <p>A code from a <strong>different batch</strong> was seen. Switch to it? This discards the {{ scanProgress().scannedCount }} part(s) scanned so far.</p>
             <div class="scanner__controls">
-              <button type="button" class="qr__ctl" (click)="acceptNewBatch()">Switch to new batch</button>
-              <button type="button" class="qr__ctl" (click)="keepCurrentBatch()">Keep current</button>
+              <button type="button" class="beam__ctl" (click)="acceptNewBatch()">Switch to new batch</button>
+              <button type="button" class="beam__ctl" (click)="keepCurrentBatch()">Keep current</button>
             </div>
           </div>
         }
@@ -283,7 +283,7 @@
           </summary>
 
           @if (scannedCodes().length === 0) {
-            <p class="scanner__empty">No QR codes scanned yet. Start the camera and scan the parts in any order.</p>
+            <p class="scanner__empty">No codes scanned yet. Start the camera and scan the parts in any order.</p>
           } @else {
             <ol class="scanner__list">
               @for (code of scannedCodes(); track code.id) {
@@ -301,7 +301,7 @@
         </details>
 
         @if (scannedCodes().length === 0) {
-          <p class="scanner__empty">No QR codes scanned yet. Start the camera and scan the parts in any order.</p>
+          <p class="scanner__empty">No codes scanned yet. Start the camera and scan the parts in any order.</p>
         }
 
         @if (receivedFiles().length > 0) {
@@ -312,17 +312,17 @@
                 <button type="button" (click)="downloadAllAsZip()">Download all (.zip)</button>
               }
             </div>
-            <ul class="qr__files">
+            <ul class="beam__files">
               @for (file of receivedFiles(); track file.name) {
-                <li class="qr__file">
-                  <span class="qr__file-name">{{ file.name }}</span>
-                  <span class="qr__meta">{{ file.text.length }} chars</span>
-                  <button type="button" class="qr__ctl" (click)="copyFile(file)">Copy</button>
+                <li class="beam__file">
+                  <span class="beam__file-name">{{ file.name }}</span>
+                  <span class="beam__meta">{{ file.text.length }} chars</span>
+                  <button type="button" class="beam__ctl" (click)="copyFile(file)">Copy</button>
                   <button type="button" (click)="downloadFile(file)">Download</button>
                 </li>
               }
             </ul>
-            <p class="qr__meta">Copy auto-clears the clipboard after 30s. Downloads save files to this device.</p>
+            <p class="beam__meta">Copy auto-clears the clipboard after 30s. Downloads save files to this device.</p>
           </div>
         }
 
@@ -330,12 +330,12 @@
           <div class="scanner__combined">
             <div class="scanner__results-header">
               <h2>Combined Text</h2>
-              <span class="qr__meta">{{ combinedCharCount() }} characters</span>
+              <span class="beam__meta">{{ combinedCharCount() }} characters</span>
             </div>
             <textarea rows="6" readonly [value]="combinedText()"></textarea>
             <div class="scanner__combined-actions">
               <button type="button" (click)="copyText()">Copy Text</button>
-              <label class="qr__interval">
+              <label class="beam__interval">
                 Save as:
                 <input
                   class="scanner__filename"
@@ -349,7 +349,7 @@
               </label>
               <button type="button" (click)="downloadText()">Download Text</button>
             </div>
-            <p class="qr__meta">Copy auto-clears the clipboard after 30s. Download saves a file to this device.</p>
+            <p class="beam__meta">Copy auto-clears the clipboard after 30s. Download saves a file to this device.</p>
           </div>
         }
       </div>

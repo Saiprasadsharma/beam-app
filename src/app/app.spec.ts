@@ -16,10 +16,10 @@ describe('App', () => {
     expect(app).toBeTruthy();
   });
 
-  it('should render the QR generator', () => {
+  it('should render the generator', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelector('h1')?.textContent).toContain('String to QR Code Generator');
+    expect(compiled.querySelector('h1')?.textContent).toContain('Beam');
   });
 });

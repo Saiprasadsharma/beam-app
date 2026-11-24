@@ -1,5 +1,5 @@
 {
-  "name": "data-to-qr-app",
+  "name": "beam-app",
   "version": "0.0.0",
   "scripts": {
     "ng": "ng",
@@ -7,7 +7,7 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "serve:ssr:data-to-qr-app": "node dist/data-to-qr-app/server/server.mjs"
+    "serve:ssr:beam-app": "node dist/beam-app/server/server.mjs"
   },
   "prettier": {
     "printWidth": 100,
